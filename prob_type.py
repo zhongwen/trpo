@@ -69,43 +69,5 @@ class DiagGauss(ProbType):
     def maxprob(self, prob):
         return prob[:, :self.d]
 
-
-def test_diag_gauss():
-    N = 100000
-    dim = 3
-    mean0 = tf.placeholder(tf.float32, shape=[None, dim], name="mean0")
-    std0 = tf.placeholder(tf.float32, shape=[None, dim], name="std0")
-    mean1 = tf.placeholder(tf.float32, shape=[None, dim], name="mean1")
-    std1 = tf.placeholder(tf.float32, shape=[None, dim], name="std1")
-    prob0 = MeanStd(mean0, std0)
-    prob1 = MeanStd(mean1, std1)
-    gauss = DiagGauss(dim)
-    ent0 = gauss.entropy(prob0)
-    kl = gauss.kl(prob0, prob1)
-    x = gauss.sample(prob0)
-    loglikelihood = gauss.loglikelihood(x, prob0)
-    loglikelihood2 = gauss.loglikelihood(x, prob1)
-    with tf.Session() as sess:
-        mean0_ = np.random.rand(1, dim)
-        std0_ = np.random.rand(1, dim)
-        mean1_ = np.random.rand(1, dim)
-        std1_ = np.random.rand(1, dim)
-        mean0_np = np.tile(mean0_, [N, 1])
-        std0_np = np.tile(std0_, [N, 1])
-        mean1_np = np.tile(mean1_, [N, 1])
-        std1_np = np.tile(std1_, [N, 1])
-        kl_val, ent0_val, loglik_val, loglik_val2 = sess.run(
-            [kl, ent0, loglikelihood, loglikelihood2],
-            {prob0.mean: mean0_np, prob0.std: std0_np, prob1.mean: mean1_np,
-             prob1.std: std1_np})
-        entval_ll = -np.mean(loglik_val)
-        entval_ll_std = np.std(loglik_val) / np.sqrt(N)
-        assert np.abs(entval_ll - np.mean(ent0_val)) < 3 * entval_ll_std
-
-        kl = np.mean(kl_val)
-        kl_ll = - np.mean(ent0_val) - np.mean(loglik_val2)
-        kl_ll_std = np.std(loglik_val2) / np.sqrt(N)
-        assert np.abs(kl - kl_ll) < 3 * kl_ll_std
-
 if __name__ == '__main__':
     test_diag_gauss()
