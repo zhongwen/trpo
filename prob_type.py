@@ -68,6 +68,3 @@ class DiagGauss(ProbType):
 
     def maxprob(self, prob):
         return prob[:, :self.d]
-
-if __name__ == '__main__':
-    test_diag_gauss()
