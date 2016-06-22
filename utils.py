@@ -21,7 +21,7 @@ def rollout(env, agent, max_pathlength, n_timesteps):
     while timesteps_sofar < n_timesteps:
         obs, actions, rewards, action_dists = [], [], [], []
         ob = env.reset()
-        agent.prev_action *= 0.0
+        # agent.prev_action *= 0.0
         agent.prev_obs *= 0.0
         for _ in xrange(max_pathlength):
             action, action_dist, ob = agent.act(ob)
@@ -37,7 +37,7 @@ def rollout(env, agent, max_pathlength, n_timesteps):
                         "rewards": np.array(rewards),
                         "actions": np.array(actions)}
                 paths.append(path)
-                agent.prev_action *= 0.0
+                # agent.prev_action *= 0.0
                 agent.prev_obs *= 0.0
                 break
         timesteps_sofar += len(path["rewards"])
@@ -63,7 +63,7 @@ class VF(object):
         l2 = (self.net - self.y) * (self.net - self.y)
         self.train = tf.train.AdamOptimizer().minimize(l2)
         self.session.run(tf.initialize_all_variables())
-        
+
 
     def _features(self, path):
         o = path["obs"].astype('float32')
@@ -84,7 +84,7 @@ class VF(object):
 
     def predict(self, path):
         if self.net is None:
-            return np.zeros(len(path["rewards"])) 
+            return np.zeros(len(path["rewards"]))
         else:
             ret = self.session.run(self.net, {self.x: self._features(path)})
             return np.reshape(ret, (ret.shape[0], ))

@@ -1,4 +1,6 @@
 from utils import *
+from prob_type import *
+from policy_net import *
 import numpy as np
 import random
 import tensorflow as tf
@@ -8,10 +10,11 @@ import logging
 import gym
 from gym import envs, scoreboard
 from gym.spaces import Discrete, Box
-import prettytensor as pt
+# import prettytensor as pt
 from space_conversion import SpaceConversionEnv
 import tempfile
 import sys
+
 
 class TRPOAgent(object):
 
@@ -24,45 +27,66 @@ class TRPOAgent(object):
     def __init__(self, env):
         self.env = env
         if not isinstance(env.observation_space, Box) or \
-           not isinstance(env.action_space, Discrete):
+           not isinstance(env.action_space, Box):
             print("Incompatible spaces.")
             exit(-1)
         print("Observation Space", env.observation_space)
         print("Action Space", env.action_space)
         self.session = tf.Session()
         self.end_count = 0
+        self.batch_size = 1
         self.train = True
+        self.action_dim = env.action_space.shape[0]
+        print(env.action_space.high)
         self.obs = obs = tf.placeholder(
             dtype, shape=[
-                None, 2 * env.observation_space.shape[0] + env.action_space.n], name="obs")
+                None, 2 * env.observation_space.shape[0]], name="obs")
         self.prev_obs = np.zeros((1, env.observation_space.shape[0]))
-        self.prev_action = np.zeros((1, env.action_space.n))
-        self.action = action = tf.placeholder(tf.int64, shape=[None], name="action")  
-        self.advant = advant = tf.placeholder(dtype, shape=[None], name="advant")  
-        self.oldaction_dist = oldaction_dist = tf.placeholder(dtype, shape=[None, env.action_space.n], name="oldaction_dist")
-
+        self.distribution = DiagGauss(self.action_dim)
+        # self.prev_action = np.zeros((1, env.action_space.n))
+        # self.action = action = tf.placeholder(tf.int64, shape=[None], name="action")
+        self.action = action = tf.placeholder(
+            tf.float32, shape=[
+                None, self.action_dim], name="action")
+        self.advant = advant = tf.placeholder(
+            dtype, shape=[None], name="advant")
+        self.oldaction_dist= oldaction_dist= tf.placeholder(
+            dtype, shape=[None, self.action_dim * 2] , name="oldaction_dist")
+        # self.oldaction_dist_std = oldaction_dist_std = tf.placeholder(
+            # dtype, shape=[None, self.action_dim], name="oldaction_dist_std")
+        # self.oldaction_dist = oldaction_dist = MeanStd(oldaction_dist_mean, oldaction_dist_std)
         # Create neural network.
-        action_dist_n, _ = (pt.wrap(self.obs).
-                            fully_connected(64, activation_fn=tf.nn.tanh).
-                            softmax_classifier(env.action_space.n))
+        # action_dist_n, _ = (pt.wrap(self.obs).
+        # fully_connected(64, activation_fn=tf.nn.tanh).
+        # fully_connected(self.action_dim, activation_fn=None))
+        self.action_dist = action_dist = construct_policy_net(
+            self.obs, self.action_dim, self.batch_size)
         eps = 1e-6
-        self.action_dist_n = action_dist_n
-        N = tf.shape(obs)[0]
-        p_n = slice_2d(action_dist_n, tf.range(0, N), action)
-        oldp_n = slice_2d(oldaction_dist, tf.range(0, N), action)
-        ratio_n = p_n / oldp_n
-        Nf = tf.cast(N, dtype)
-        surr = -tf.reduce_mean(ratio_n * advant)  # Surrogate loss
+        # N = tf.shape(obs)[0]
+        # p_n = slice_2d(action_dist_n, tf.range(0, N), action)
+        # oldp_n = slice_2d(oldaction_dist, tf.range(0, N), action)
+        p_n = self.distribution.loglikelihood(action, action_dist)
+        oldp_n = self.distribution.loglikelihood(action, self.oldaction_dist)
+
+        # Nf = tf.cast(N, dtype)
+        surr = -tf.reduce_mean(tf.exp(p_n - oldp_n) * advant)  # Surrogate loss
         var_list = tf.trainable_variables()
-        kl = tf.reduce_sum(oldaction_dist * tf.log((oldaction_dist + eps) / (action_dist_n + eps))) / Nf
-        ent = tf.reduce_sum(-action_dist_n * tf.log(action_dist_n + eps)) / Nf
+        # kl = tf.reduce_sum(oldaction_dist * tf.log((oldaction_dist + eps) / (action_dist_n + eps))) / Nf
+        # ent = tf.reduce_sum(-action_dist_n * tf.log(action_dist_n + eps)) / Nf
+        kl = tf.reduce_mean(self.distribution.kl(oldaction_dist, action_dist))
+        ent = tf.reduce_mean(self.distribution.entropy(action_dist))
 
         self.losses = [surr, kl, ent]
         self.pg = flatgrad(surr, var_list)
         # KL divergence where first arg is fixed
         # replace old->tf.stop_gradient from previous kl
-        kl_firstfixed = tf.reduce_sum(tf.stop_gradient(
-            action_dist_n) * tf.log(tf.stop_gradient(action_dist_n + eps) / (action_dist_n + eps))) / Nf
+        # kl_firstfixed = tf.reduce_sum(tf.stop_gradient(
+        # action_dist_n) * tf.log(tf.stop_gradient(action_dist_n + eps) /
+        # (action_dist_n + eps))) / Nf
+        prob_np_fixed = tf.stop_gradient(action_dist)
+        kl_firstfixed = tf.reduce_mean(
+            self.distribution.kl(
+                prob_np_fixed, action_dist))
         grads = tf.gradients(kl_firstfixed, var_list)
         self.flat_tangent = tf.placeholder(dtype, shape=[None])
         shapes = map(var_shape, var_list)
@@ -83,16 +107,20 @@ class TRPOAgent(object):
     def act(self, obs, *args):
         obs = np.expand_dims(obs, 0)
         self.prev_obs = obs
-        obs_new = np.concatenate([obs, self.prev_obs, self.prev_action], 1)
+        obs_new = np.concatenate([obs, self.prev_obs], 1)
 
-        action_dist_n = self.session.run(self.action_dist_n, {self.obs: obs_new})
+        action_dist_n = self.session.run(
+            self.action_dist, {self.obs: obs_new})
 
-        if self.train:
-            action = int(cat_sample(action_dist_n)[0])
-        else:
-            action = int(np.argmax(action_dist_n))
-        self.prev_action *= 0.0
-        self.prev_action[0, action] = 1.0
+        # if self.train:
+        # action = int(cat_sample(action_dist_n)[0])
+        # else:
+        # action = int(np.argmax(action_dist_n))
+        action = self.distribution.sample(action_dist_n)
+        action = np.clip(action, self.env.action_space.low, self.env.action_space.high)
+        action = action.flatten()
+        # self.prev_action *= 0.0
+        # self.prev_action[0, action] = 1.0
         return action, action_dist_n, np.squeeze(obs_new)
 
     def learn(self):
@@ -116,7 +144,8 @@ class TRPOAgent(object):
                 path["advant"] = path["returns"] - path["baseline"]
 
             # Updating policy.
-            action_dist_n = np.concatenate([path["action_dists"] for path in paths])
+            action_dist_n = np.concatenate(
+                [path["action_dists"] for path in paths])
             obs_n = np.concatenate([path["obs"] for path in paths])
             action_n = np.concatenate([path["actions"] for path in paths])
             baseline_n = np.concatenate([path["baseline"] for path in paths])
@@ -132,22 +161,21 @@ class TRPOAgent(object):
 
             feed = {self.obs: obs_n,
                     self.action: action_n,
-                self.advant: advant_n,
+                    self.advant: advant_n,
                     self.oldaction_dist: action_dist_n}
-
 
             episoderewards = np.array(
                 [path["rewards"].sum() for path in paths])
 
             print "\n********** Iteration %i ************" % i
-            if episoderewards.mean() > 1.1 * self.env._env.spec.reward_threshold:
-                self.train = False
+            # if episoderewards.mean() > 1.1 * self.env._env.spec.reward_threshold:
+                # self.train = False
             if not self.train:
                 print("Episode mean: %f" % episoderewards.mean())
                 self.end_count += 1
                 if self.end_count > 100:
                     break
-            if self.train: 
+            if self.train:
                 self.vf.fit(paths)
                 thprev = self.gf()
 
@@ -180,9 +208,12 @@ class TRPOAgent(object):
                 stats["Total number of episodes"] = numeptotal
                 stats["Average sum of rewards per episode"] = episoderewards.mean()
                 stats["Entropy"] = entropy
-                exp = explained_variance(np.array(baseline_n), np.array(returns_n))
+                exp = explained_variance(
+                    np.array(baseline_n),
+                    np.array(returns_n))
                 stats["Baseline explained"] = exp
-                stats["Time elapsed"] = "%.2f mins" % ((time.time() - start_time) / 60.0)
+                stats["Time elapsed"] = "%.2f mins" % (
+                    (time.time() - start_time) / 60.0)
                 stats["KL between old and new distribution"] = kloldnew
                 stats["Surrogate loss"] = surrafter
                 for k, v in stats.iteritems():
@@ -199,17 +230,15 @@ logging.getLogger().setLevel(logging.DEBUG)
 if len(sys.argv) > 1:
     task = sys.argv[1]
 else:
-    task = "RepeatCopy-v0"
+    task = "Pendulum-v0"
 
 env = envs.make(task)
 env.monitor.start(training_dir)
 
-env = SpaceConversionEnv(env, Box, Discrete)
+env = SpaceConversionEnv(env, Box, Box)
 
 agent = TRPOAgent(env)
 agent.learn()
 env.monitor.close()
-gym.upload(training_dir, 
+gym.upload(training_dir,
            algorithm_id='trpo_ff')
-
-     
