@@ -4,9 +4,9 @@ import prettytensor as pt
 
 def construct_policy_net(obs, action_dim):
     mean = (
-        pt.wrap(obs).fully_connected(64, activation_fn=tf.nn.tanh).
-        fully_connected(64, activation_fn=tf.nn.tanh).
-        fully_connected(action_dim, activation_fn=None))
+        pt.wrap(obs).fully_connected(64, activation_fn=tf.nn.tanh, stddev=0.01).
+        fully_connected(64, activation_fn=tf.nn.tanh, stddev=0.01).
+        fully_connected(action_dim, activation_fn=None, stddev=0.01))
     input_dim = obs.get_shape()[1]
     zero_weight = tf.get_variable('zero_weight', shape=[input_dim, action_dim],
                                   initializer=tf.constant_initializer(0.0))

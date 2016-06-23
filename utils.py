@@ -23,7 +23,7 @@ def rollout(env, agent, max_pathlength, n_timesteps):
         ob = env.reset()
         # agent.prev_action *= 0.0
         agent.prev_obs *= 0.0
-        for _ in xrange(max_pathlength):
+        for path_i in xrange(max_pathlength):
             action, action_dist, ob = agent.act(ob)
             obs.append(ob)
             actions.append(action)
@@ -56,12 +56,13 @@ class VF(object):
         self.x = tf.placeholder(tf.float32, shape=[None, shape], name="x")
         self.y = tf.placeholder(tf.float32, shape=[None], name="y")
         self.net = (pt.wrap(self.x).
-                    fully_connected(64, activation_fn=tf.nn.relu).
-                    fully_connected(64, activation_fn=tf.nn.relu).
-                    fully_connected(1))
+                    fully_connected(64, activation_fn=tf.nn.tanh, stddev=0.01).
+                    fully_connected(64, activation_fn=tf.nn.tanh, stddev=0.01).
+                    fully_connected(1, activation_fn=None, stddev=0.01))
         self.net = tf.reshape(self.net, (-1, ))
         l2 = (self.net - self.y) * (self.net - self.y)
-        self.train = tf.train.AdamOptimizer().minimize(l2)
+        self.opt = tf.train.AdamOptimizer(learning_rate=0.001)
+        self.train = self.opt.minimize(l2)
         self.session.run(tf.initialize_all_variables())
 
 

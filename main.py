@@ -20,9 +20,11 @@ class TRPOAgent(object):
 
     config = dict2(**{
         "timesteps_per_batch": 5000,
-        "max_pathlength": 10000,
+        "max_pathlength": 200,
         "max_kl": 0.01,
-        "gamma": 0.995})
+        "gamma": 0.995,
+        "cg_damping": 0.1,
+    })
 
     def __init__(self, env):
         self.env = env
@@ -36,10 +38,9 @@ class TRPOAgent(object):
         self.end_count = 0
         self.train = True
         self.action_dim = env.action_space.shape[0]
-        print(env.action_space.high)
         self.obs = obs = tf.placeholder(
             dtype, shape=[
-                None, 2 * env.observation_space.shape[0]], name="obs")
+                None, env.observation_space.shape[0]], name="obs")
         self.prev_obs = np.zeros((1, env.observation_space.shape[0]))
         self.distribution = DiagGauss(self.action_dim)
         # self.prev_action = np.zeros((1, env.action_space.n))
@@ -106,9 +107,9 @@ class TRPOAgent(object):
     def act(self, obs, *args):
         obs = np.expand_dims(obs, 0)
         self.prev_obs = obs
-        obs_new = np.concatenate([obs, self.prev_obs], 1)
+        # obs_new = np.concatenate([obs, self.prev_obs], 1)
         action_dist_n = self.session.run(
-            self.action_dist, {self.obs: obs_new})
+            self.action_dist, {self.obs: obs})
 
         # if self.train:
         # action = int(cat_sample(action_dist_n)[0])
@@ -119,7 +120,7 @@ class TRPOAgent(object):
         action = action.flatten()
         # self.prev_action *= 0.0
         # self.prev_action[0, action] = 1.0
-        return action, action_dist_n, np.squeeze(obs_new)
+        return action, action_dist_n, np.squeeze(obs)
 
     def learn(self):
         config = self.config
@@ -178,7 +179,9 @@ class TRPOAgent(object):
 
                 def fisher_vector_product(p):
                     feed[self.flat_tangent] = p
-                    return self.session.run(self.fvp, feed)
+                    fvp = self.session.run(self.fvp, feed)
+                    fvp += p * config.cg_damping
+                    return fvp
 
                 g = self.session.run(self.pg, feed_dict=feed)
                 stepdir = conjugate_gradient(fisher_vector_product, -g)
@@ -217,12 +220,12 @@ class TRPOAgent(object):
                     print(k + ": " + " " * (40 - len(k)) + str(v))
                 if entropy != entropy:
                     exit(-1)
-                if exp > 0.8:
-                    self.train = False
+                # if exp > 0.8:
+                    # self.train = False
             i += 1
 
 training_dir = tempfile.mkdtemp()
-logging.getLogger().setLevel(logging.DEBUG)
+# logging.getLogger().setLevel(logging.DEBUG)
 
 if len(sys.argv) > 1:
     task = sys.argv[1]
