@@ -19,10 +19,10 @@ import sys
 class TRPOAgent(object):
 
     config = dict2(**{
-        "timesteps_per_batch": 1000,
+        "timesteps_per_batch": 5000,
         "max_pathlength": 10000,
         "max_kl": 0.01,
-        "gamma": 0.95})
+        "gamma": 0.995})
 
     def __init__(self, env):
         self.env = env
@@ -34,7 +34,6 @@ class TRPOAgent(object):
         print("Action Space", env.action_space)
         self.session = tf.Session()
         self.end_count = 0
-        self.batch_size = 1
         self.train = True
         self.action_dim = env.action_space.shape[0]
         print(env.action_space.high)
@@ -60,7 +59,7 @@ class TRPOAgent(object):
         # fully_connected(64, activation_fn=tf.nn.tanh).
         # fully_connected(self.action_dim, activation_fn=None))
         self.action_dist = action_dist = construct_policy_net(
-            self.obs, self.action_dim, self.batch_size)
+            self.obs, self.action_dim)
         eps = 1e-6
         # N = tf.shape(obs)[0]
         # p_n = slice_2d(action_dist_n, tf.range(0, N), action)
@@ -108,7 +107,6 @@ class TRPOAgent(object):
         obs = np.expand_dims(obs, 0)
         self.prev_obs = obs
         obs_new = np.concatenate([obs, self.prev_obs], 1)
-
         action_dist_n = self.session.run(
             self.action_dist, {self.obs: obs_new})
 
@@ -158,7 +156,6 @@ class TRPOAgent(object):
             # Computing baseline function for next iter.
 
             advant_n /= (advant_n.std() + 1e-8)
-
             feed = {self.obs: obs_n,
                     self.action: action_n,
                     self.advant: advant_n,
@@ -173,7 +170,7 @@ class TRPOAgent(object):
             if not self.train:
                 print("Episode mean: %f" % episoderewards.mean())
                 self.end_count += 1
-                if self.end_count > 100:
+                if self.end_count > 1000:
                     break
             if self.train:
                 self.vf.fit(paths)
