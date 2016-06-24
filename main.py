@@ -24,11 +24,11 @@ tf.set_random_seed(seed)
 class TRPOAgent(object):
 
     config = dict2(**{
-        "timesteps_per_batch": 20000,
-        "max_pathlength": 2000,
-        "max_kl": 1e-3,
-        "gamma": 0.99,
-        "cg_damping": 1e-3,
+        "timesteps_per_batch": 5000,
+        "max_pathlength": 200,
+        "max_kl": 0.01,
+        "gamma": 0.995,
+        "cg_damping": 0.1,
     })
 
     def __init__(self, env):
