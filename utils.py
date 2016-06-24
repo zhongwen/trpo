@@ -1,13 +1,10 @@
+from __future__ import division
 import numpy as np
 import tensorflow as tf
 import random
 import scipy.signal
 import prettytensor as pt
 
-seed = 1
-random.seed(seed)
-np.random.seed(seed)
-tf.set_random_seed(seed)
 
 dtype = tf.float32
 
@@ -15,23 +12,46 @@ def discount(x, gamma):
     assert x.ndim >= 1
     return scipy.signal.lfilter([1], [1, -gamma], x[::-1], axis=0)[::-1]
 
+class Filter:
+    def __init__(self, filter_mean=True):
+        self.m1 = 0
+        self.v = 0
+        self.n = 0.
+        self.filter_mean = filter_mean
+
+    def __call__(self, o):
+        self.m1 = self.m1 * (self.n / (self.n + 1)) + o    * 1/(1 + self.n)
+        self.v = self.v * (self.n / (self.n + 1)) + (o - self.m1)**2 * 1/(1 + self.n)
+        self.std = (self.v + 1e-6)**.5 # std
+        self.n += 1
+        if self.filter_mean:
+            o1 =  (o - self.m1)/self.std
+        else:
+            o1 =  o/self.std
+        o1 = (o1 > 10) * 10 + (o1 < -10)* (-10) + (o1 < 10) * (o1 > -10) * o1
+        return o1
+
+ob_filter = Filter()
+
 def rollout(env, agent, max_pathlength, n_timesteps):
     paths = []
     timesteps_sofar = 0
     while timesteps_sofar < n_timesteps:
         obs, actions, rewards, action_dists = [], [], [], []
-        ob = env.reset()
+        ob = ob_filter(env.reset())
         # agent.prev_action *= 0.0
         agent.prev_obs *= 0.0
         for path_i in xrange(max_pathlength):
+            timesteps_sofar += 1
             action, action_dist, ob = agent.act(ob)
             obs.append(ob)
             actions.append(action)
             action_dists.append(action_dist)
             res = env.step(action)
             ob = res[0]
+            ob = ob_filter(ob)
             rewards.append(res[1])
-            if res[2]:
+            if res[2] or timesteps_sofar == n_timesteps:
                 path = {"obs": np.concatenate(np.expand_dims(obs, 0)),
                         "action_dists": np.concatenate(action_dists),
                         "rewards": np.array(rewards),
@@ -40,56 +60,29 @@ def rollout(env, agent, max_pathlength, n_timesteps):
                 # agent.prev_action *= 0.0
                 agent.prev_obs *= 0.0
                 break
-        timesteps_sofar += len(path["rewards"])
     return paths
 
 
-class VF(object):
+class LinearVF(object):
     coeffs = None
-
-    def __init__(self, session):
-        self.net = None
-        self.session = session
-
-    def create_net(self, shape):
-        print(shape)
-        self.x = tf.placeholder(tf.float32, shape=[None, shape], name="x")
-        self.y = tf.placeholder(tf.float32, shape=[None], name="y")
-        self.net = (pt.wrap(self.x).
-                    fully_connected(64, activation_fn=tf.nn.tanh, stddev=0.01).
-                    fully_connected(64, activation_fn=tf.nn.tanh, stddev=0.01).
-                    fully_connected(1, activation_fn=None, stddev=0.01))
-        self.net = tf.reshape(self.net, (-1, ))
-        l2 = (self.net - self.y) * (self.net - self.y)
-        self.opt = tf.train.AdamOptimizer(learning_rate=0.001)
-        self.train = self.opt.minimize(l2)
-        self.session.run(tf.initialize_all_variables())
-
 
     def _features(self, path):
         o = path["obs"].astype('float32')
         o = o.reshape(o.shape[0], -1)
-        act = path["action_dists"].astype('float32')
         l = len(path["rewards"])
-        al = np.arange(l).reshape(-1, 1) / 10.0
-        ret = np.concatenate([o, act, al, np.ones((l, 1))], axis=1)
-        return ret
+        al = np.arange(l).reshape(-1, 1) / 100.0
+        return np.concatenate([o, o**2, al, al**2, np.ones((l, 1))], axis=1)
 
     def fit(self, paths):
         featmat = np.concatenate([self._features(path) for path in paths])
-        if self.net is None:
-            self.create_net(featmat.shape[1])
         returns = np.concatenate([path["returns"] for path in paths])
-        for _ in range(50):
-            self.session.run(self.train, {self.x: featmat, self.y: returns})
+        n_col = featmat.shape[1]
+        lamb = 2.0
+        self.coeffs = np.linalg.lstsq(featmat.T.dot(featmat) + lamb * np.identity(n_col), featmat.T.dot(returns))[0]
 
     def predict(self, path):
-        if self.net is None:
-            return np.zeros(len(path["rewards"]))
-        else:
-            ret = self.session.run(self.net, {self.x: self._features(path)})
-            return np.reshape(ret, (ret.shape[0], ))
-
+        return np.zeros(len(path["rewards"])) if self.coeffs is None else self._features(
+            path).dot(self.coeffs)
 
 def cat_sample(prob_nk):
     assert prob_nk.ndim == 2

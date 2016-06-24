@@ -64,7 +64,7 @@ class DiagGauss(ProbType):
     def sample(self, prob):
         mean_nd = prob[:, :self.d]
         std_nd = prob[:, self.d:]
-        return np.random.rand(mean_nd.shape[0], self.d) * std_nd + mean_nd
+        return np.random.randn(mean_nd.shape[0], self.d) * std_nd + mean_nd
 
     def maxprob(self, prob):
         return prob[:, :self.d]

@@ -1,3 +1,4 @@
+from __future__ import print_function, absolute_import, division
 from utils import *
 from prob_type import *
 from policy_net import *
@@ -11,19 +12,23 @@ import gym
 from gym import envs, scoreboard
 from gym.spaces import Discrete, Box
 # import prettytensor as pt
-from space_conversion import SpaceConversionEnv
+# from space_conversion import SpaceConversionEnv
 import tempfile
 import sys
 
+seed = 1
+random.seed(seed)
+np.random.seed(seed)
+tf.set_random_seed(seed)
 
 class TRPOAgent(object):
 
     config = dict2(**{
-        "timesteps_per_batch": 5000,
-        "max_pathlength": 200,
-        "max_kl": 0.01,
-        "gamma": 0.995,
-        "cg_damping": 0.1,
+        "timesteps_per_batch": 20000,
+        "max_pathlength": 2000,
+        "max_kl": 1e-3,
+        "gamma": 0.99,
+        "cg_damping": 1e-3,
     })
 
     def __init__(self, env):
@@ -62,17 +67,13 @@ class TRPOAgent(object):
         self.action_dist = action_dist = construct_policy_net(
             self.obs, self.action_dim)
         eps = 1e-6
-        # N = tf.shape(obs)[0]
         # p_n = slice_2d(action_dist_n, tf.range(0, N), action)
         # oldp_n = slice_2d(oldaction_dist, tf.range(0, N), action)
         p_n = self.distribution.loglikelihood(action, action_dist)
         oldp_n = self.distribution.loglikelihood(action, self.oldaction_dist)
 
-        # Nf = tf.cast(N, dtype)
         surr = -tf.reduce_mean(tf.exp(p_n - oldp_n) * advant)  # Surrogate loss
         var_list = tf.trainable_variables()
-        # kl = tf.reduce_sum(oldaction_dist * tf.log((oldaction_dist + eps) / (action_dist_n + eps))) / Nf
-        # ent = tf.reduce_sum(-action_dist_n * tf.log(action_dist_n + eps)) / Nf
         kl = tf.reduce_mean(self.distribution.kl(oldaction_dist, action_dist))
         ent = tf.reduce_mean(self.distribution.entropy(action_dist))
 
@@ -101,7 +102,7 @@ class TRPOAgent(object):
         self.fvp = flatgrad(gvp, var_list)
         self.gf = GetFlat(self.session, var_list)
         self.sff = SetFromFlat(self.session, var_list)
-        self.vf = VF(self.session)
+        self.vf = LinearVF()
         self.session.run(tf.initialize_all_variables())
 
     def act(self, obs, *args):
@@ -116,7 +117,7 @@ class TRPOAgent(object):
         # else:
         # action = int(np.argmax(action_dist_n))
         action = self.distribution.sample(action_dist_n)
-        action = np.clip(action, self.env.action_space.low, self.env.action_space.high)
+        # action = np.clip(action, self.env.action_space.low, self.env.action_space.high)
         action = action.flatten()
         # self.prev_action *= 0.0
         # self.prev_action[0, action] = 1.0
@@ -165,7 +166,7 @@ class TRPOAgent(object):
             episoderewards = np.array(
                 [path["rewards"].sum() for path in paths])
 
-            print "\n********** Iteration %i ************" % i
+            print("\n********** Iteration %i ************" % i)
             # if episoderewards.mean() > 1.1 * self.env._env.spec.reward_threshold:
                 # self.train = False
             if not self.train:
@@ -199,8 +200,8 @@ class TRPOAgent(object):
 
                 surrafter, kloldnew, entropy = self.session.run(
                     self.losses, feed_dict=feed)
-                if kloldnew > 2.0 * config.max_kl:
-                    self.sff(thprev)
+                # if kloldnew > 2.0 * config.max_kl:
+                    # self.sff(thprev)
 
                 stats = {}
 
@@ -234,8 +235,7 @@ else:
 
 env = envs.make(task)
 env.monitor.start(training_dir)
-
-env = SpaceConversionEnv(env, Box, Box)
+# env = SpaceConversionEnv(env, Box, Box)
 
 agent = TRPOAgent(env)
 agent.learn()
