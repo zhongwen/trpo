@@ -1,16 +1,16 @@
 from __future__ import division
 import numpy as np
 import tensorflow as tf
-import random
 import scipy.signal
-import prettytensor as pt
 
 
 dtype = tf.float32
 
+
 def discount(x, gamma):
     assert x.ndim >= 1
     return scipy.signal.lfilter([1], [1, -gamma], x[::-1], axis=0)[::-1]
+
 
 class Filter:
     def __init__(self, filter_mean=True):
@@ -33,14 +33,13 @@ class Filter:
 
 ob_filter = Filter()
 
+
 def rollout(env, agent, max_pathlength, n_timesteps):
     paths = []
     timesteps_sofar = 0
     while timesteps_sofar < n_timesteps:
         obs, actions, rewards, action_dists = [], [], [], []
         ob = ob_filter(env.reset())
-        # agent.prev_action *= 0.0
-        agent.prev_obs *= 0.0
         for path_i in xrange(max_pathlength):
             timesteps_sofar += 1
             action, action_dist, ob = agent.act(ob)
@@ -57,8 +56,6 @@ def rollout(env, agent, max_pathlength, n_timesteps):
                         "rewards": np.array(rewards),
                         "actions": np.array(actions)}
                 paths.append(path)
-                # agent.prev_action *= 0.0
-                agent.prev_obs *= 0.0
                 break
     return paths
 
@@ -193,10 +190,12 @@ def conjugate_gradient(f_Ax, b, cg_iters=10, residual_tol=1e-10):
             break
     return x
 
+
 class dict2(dict):
     def __init__(self, **kwargs):
         dict.__init__(self, kwargs)
         self.__dict__ = self
+
 
 def explained_variance(ypred, y):
     assert y.ndim == 1 and ypred.ndim == 1

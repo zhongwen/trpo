@@ -11,8 +11,6 @@ import logging
 import gym
 from gym import envs, scoreboard
 from gym.spaces import Discrete, Box
-# import prettytensor as pt
-# from space_conversion import SpaceConversionEnv
 import tempfile
 import sys
 
@@ -48,8 +46,6 @@ class TRPOAgent(object):
                 None, env.observation_space.shape[0]], name="obs")
         self.prev_obs = np.zeros((1, env.observation_space.shape[0]))
         self.distribution = DiagGauss(self.action_dim)
-        # self.prev_action = np.zeros((1, env.action_space.n))
-        # self.action = action = tf.placeholder(tf.int64, shape=[None], name="action")
         self.action = action = tf.placeholder(
             tf.float32, shape=[
                 None, self.action_dim], name="action")
@@ -57,18 +53,10 @@ class TRPOAgent(object):
             dtype, shape=[None], name="advant")
         self.oldaction_dist= oldaction_dist= tf.placeholder(
             dtype, shape=[None, self.action_dim * 2] , name="oldaction_dist")
-        # self.oldaction_dist_std = oldaction_dist_std = tf.placeholder(
-            # dtype, shape=[None, self.action_dim], name="oldaction_dist_std")
-        # self.oldaction_dist = oldaction_dist = MeanStd(oldaction_dist_mean, oldaction_dist_std)
         # Create neural network.
-        # action_dist_n, _ = (pt.wrap(self.obs).
-        # fully_connected(64, activation_fn=tf.nn.tanh).
-        # fully_connected(self.action_dim, activation_fn=None))
         self.action_dist = action_dist = construct_policy_net(
             self.obs, self.action_dim)
         eps = 1e-6
-        # p_n = slice_2d(action_dist_n, tf.range(0, N), action)
-        # oldp_n = slice_2d(oldaction_dist, tf.range(0, N), action)
         p_n = self.distribution.loglikelihood(action, action_dist)
         oldp_n = self.distribution.loglikelihood(action, self.oldaction_dist)
 
@@ -81,9 +69,6 @@ class TRPOAgent(object):
         self.pg = flatgrad(surr, var_list)
         # KL divergence where first arg is fixed
         # replace old->tf.stop_gradient from previous kl
-        # kl_firstfixed = tf.reduce_sum(tf.stop_gradient(
-        # action_dist_n) * tf.log(tf.stop_gradient(action_dist_n + eps) /
-        # (action_dist_n + eps))) / Nf
         prob_np_fixed = tf.stop_gradient(action_dist)
         kl_firstfixed = tf.reduce_mean(
             self.distribution.kl(
@@ -108,19 +93,11 @@ class TRPOAgent(object):
     def act(self, obs, *args):
         obs = np.expand_dims(obs, 0)
         self.prev_obs = obs
-        # obs_new = np.concatenate([obs, self.prev_obs], 1)
         action_dist_n = self.session.run(
             self.action_dist, {self.obs: obs})
 
-        # if self.train:
-        # action = int(cat_sample(action_dist_n)[0])
-        # else:
-        # action = int(np.argmax(action_dist_n))
         action = self.distribution.sample(action_dist_n)
-        # action = np.clip(action, self.env.action_space.low, self.env.action_space.high)
         action = action.flatten()
-        # self.prev_action *= 0.0
-        # self.prev_action[0, action] = 1.0
         return action, action_dist_n, np.squeeze(obs)
 
     def learn(self):
@@ -167,8 +144,6 @@ class TRPOAgent(object):
                 [path["rewards"].sum() for path in paths])
 
             print("\n********** Iteration %i ************" % i)
-            # if episoderewards.mean() > 1.1 * self.env._env.spec.reward_threshold:
-                # self.train = False
             if not self.train:
                 print("Episode mean: %f" % episoderewards.mean())
                 self.end_count += 1
@@ -226,7 +201,7 @@ class TRPOAgent(object):
             i += 1
 
 training_dir = tempfile.mkdtemp()
-# logging.getLogger().setLevel(logging.DEBUG)
+logging.getLogger().setLevel(logging.DEBUG)
 
 if len(sys.argv) > 1:
     task = sys.argv[1]
