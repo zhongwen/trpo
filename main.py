@@ -26,6 +26,7 @@ class TRPOAgent(object):
         "max_pathlength": 200,
         "max_kl": 0.01,
         "gamma": 0.995,
+        "lam": 0.97,
         "cg_damping": 0.1,
     })
 
@@ -117,8 +118,10 @@ class TRPOAgent(object):
             # Computing returns and estimating advantage function.
             for path in paths:
                 path["baseline"] = self.vf.predict(path)
+                path_baselines = np.append(path["baseline"], 0)
+                deltas = path["rewards"] + config.gamma * path_baselines[1:] - path_baselines[:-1]
+                path["advant"] = discount(deltas, config.gamma * config.lam)
                 path["returns"] = discount(path["rewards"], config.gamma)
-                path["advant"] = path["returns"] - path["baseline"]
 
             # Updating policy.
             action_dist_n = np.concatenate(
